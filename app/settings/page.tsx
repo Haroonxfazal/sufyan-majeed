@@ -23,8 +23,8 @@ export default async function SettingsPage() {
               </Badge>
             </div>
             <CardDescription>
-              UniqueAcademyAgent.exe on the academy PC reads the fingerprint machine and sends SMS
-              through the Android phone.
+              UniqueAcademyAgent.exe on the academy PC reads the fingerprint machine and uploads
+              punches. SMS are sent by this website, not by the program.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
@@ -35,9 +35,8 @@ export default async function SettingsPage() {
               <li>When classes end, close the window.</li>
             </ol>
             <p className="text-muted-foreground">
-              While it is closed, this website still works. SMS you send wait in the queue and go out
-              when the program is opened again. Punches made while it was closed are picked up on
-              the next start.
+              While it is closed, this website (including SMS) still works. Punches made while it
+              was closed are picked up on the next start.
             </p>
           </CardContent>
         </Card>
@@ -57,11 +56,11 @@ export default async function SettingsPage() {
               powered and its IP matches ZKTECO_IP in agent.env.
             </p>
             <p>
-              <span className="font-medium text-foreground">SMS stuck on Queued:</span> check the
-              Android phone is on the academy Wi-Fi with the gateway app open.
+              <span className="font-medium text-foreground">SMS failed:</span> check the Android
+              phone has internet and the SMS Gateway app is running in Cloud Server mode.
             </p>
             <p>
-              <span className="font-medium text-foreground">Check everything at once:</span> run
+              <span className="font-medium text-foreground">Check the program&apos;s connections:</span> run
               <code className="mx-1 rounded bg-muted px-1 font-mono text-xs">UniqueAcademyAgent.exe --test</code>
               in a command prompt.
             </p>

@@ -170,10 +170,115 @@ export async function getFeePendingRecipients(): Promise<FeeRecipient[]> {
     .filter((s) => s.pendingDue > 0);
 }
 
+/* ---------------------------------------------------------------------------
+ * SMS Gateway ("SMS Gateway for Android" app by capcom6, https://sms-gate.app)
+ *
+ * The website sends SMS itself. Because the website runs on Cloudflare, the phone
+ * must be reachable from the internet, so use the app's Cloud Server mode:
+ *   SMS_GATEWAY_URL=https://api.sms-gate.app/3rdparty/v1/messages
+ *   SMS_GATEWAY_AUTH_TOKEN=<cloud username>:<cloud password>   (shown in the app)
+ * Local Server mode (http://<phone-ip>:8080/message) still works when the website
+ * itself runs on the academy network.
+ * When SMS_GATEWAY_ENABLED is not "true", SMS are only logged (demo mode).
+ * --------------------------------------------------------------------------- */
+
+function getSmsGatewayConfig() {
+  return {
+    enabled: process.env.SMS_GATEWAY_ENABLED === "true",
+    url: (process.env.SMS_GATEWAY_URL ?? "").replace(/\/+$/, ""),
+    deviceId: process.env.SMS_GATEWAY_DEVICE_ID ?? "",
+    authToken: process.env.SMS_GATEWAY_AUTH_TOKEN ?? "",
+  };
+}
+
+export function isSmsGatewayEnabled() {
+  return getSmsGatewayConfig().enabled;
+}
+
+function buildAuthHeader(authToken: string): Record<string, string> {
+  if (!authToken) return {};
+  if (/^(basic|bearer) /i.test(authToken)) return { Authorization: authToken };
+  if (authToken.includes(":")) {
+    return { Authorization: `Basic ${Buffer.from(authToken).toString("base64")}` };
+  }
+  return { Authorization: `Bearer ${authToken}` };
+}
+
+// Remembered per server instance so later SMS go straight to the URL that worked.
+let workingGatewayUrl: string | null = null;
+
+async function sendViaGateway(
+  phone: string,
+  message: string,
+): Promise<{ success: boolean; providerMessageId?: string; error?: string }> {
+  const config = getSmsGatewayConfig();
+
+  if (!config.enabled) {
+    return { success: true, providerMessageId: `DEMO-${Date.now()}` };
+  }
+  if (!config.url) {
+    return { success: false, error: "SMS_GATEWAY_URL is not set" };
+  }
+
+  const headers = { "Content-Type": "application/json", ...buildAuthHeader(config.authToken) };
+  const base = config.url;
+  const candidates = [
+    workingGatewayUrl,
+    base,
+    ...(/\/messages?$/.test(base) ? [] : [`${base}/messages`, `${base}/message`, `${base}/3rdparty/v1/messages`]),
+  ].filter((u, i, all): u is string => Boolean(u) && all.indexOf(u) === i);
+
+  // Current API body, then the older generic body for other gateway apps.
+  const bodies = [
+    {
+      textMessage: { text: message },
+      phoneNumbers: [phone],
+      ...(config.deviceId ? { deviceId: config.deviceId } : {}),
+    },
+    { message, phoneNumbers: [phone], phone, number: phone, to: phone, text: message },
+  ];
+
+  let lastError = "";
+  for (const url of candidates) {
+    for (const body of bodies) {
+      try {
+        const target = new URL(url);
+        target.searchParams.set("skipPhoneValidation", "true"); // allow 03XXXXXXXXX numbers
+        const res = await fetch(target, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(10000),
+        });
+        if (res.ok) {
+          workingGatewayUrl = url;
+          const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+          return {
+            success: true,
+            providerMessageId: String(data.id ?? data.message_id ?? data.messageId ?? `GW-${Date.now()}`),
+          };
+        }
+        const text = await res.text().catch(() => "");
+        lastError = `Gateway returned ${res.status}: ${text.slice(0, 150)}`;
+        if (res.status === 401 || res.status === 403) {
+          return { success: false, error: `${lastError} (check SMS_GATEWAY_AUTH_TOKEN username:password)` };
+        }
+        if (res.status === 404 || res.status === 405) break; // wrong path: try next URL
+      } catch (err) {
+        lastError = `Could not reach the SMS gateway at ${url} (${err instanceof Error ? err.message : "connection failed"})`;
+        break; // unreachable: try next URL
+      }
+    }
+  }
+
+  return {
+    success: false,
+    error: lastError || "Could not reach the SMS gateway. Check the phone has internet and the app is running.",
+  };
+}
+
 /**
- * Queue an SMS. The academy agent (device-service/agent.py) picks up queued rows
- * every few seconds, sends them through the Android gateway phone on the academy
- * network, and marks them sent / failed.
+ * Send an SMS through the gateway and log the result to sms_logs.
  */
 export async function sendSmsNotification({
   toPhone,
@@ -191,21 +296,28 @@ export async function sendSmsNotification({
   }
 
   const supabase = await createClient();
-  const cleanedPhone = toPhone.trim().replace(/[^0-9+]/g, "");
+  const phone = normalizePakistaniPhone(toPhone.trim());
 
-  if (!cleanedPhone) {
+  if (!phone) {
     return { success: false, error: "Invalid phone number" };
   }
+
+  const gatewayResult = await sendViaGateway(phone, body.trim());
+  const config = getSmsGatewayConfig();
+  const now = new Date().toISOString();
 
   const { data, error } = await supabase
     .from("sms_logs")
     .insert({
-      to_phone: normalizePakistaniPhone(cleanedPhone),
+      to_phone: phone,
       template_key: templateKey,
       body: body.trim(),
-      status: "queued",
-      provider: "android_gateway",
+      status: gatewayResult.success ? "sent" : "failed",
+      error_message: gatewayResult.success ? null : (gatewayResult.error ?? "Gateway delivery failed"),
+      provider: config.enabled ? "android_gateway" : "local_demo",
+      provider_message_id: gatewayResult.providerMessageId ?? `ERR-${Date.now()}`,
       student_id: studentId ?? null,
+      sent_at: gatewayResult.success ? now : null,
     })
     .select()
     .single();
@@ -213,7 +325,9 @@ export async function sendSmsNotification({
   if (error) {
     return { success: false, error: error.message };
   }
-
+  if (!gatewayResult.success) {
+    return { success: false, error: gatewayResult.error ?? "Gateway failed" };
+  }
   return { success: true, logId: data?.id };
 }
 

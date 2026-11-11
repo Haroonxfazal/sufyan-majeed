@@ -22,7 +22,10 @@ export async function POST(request: Request) {
 
     // 1. Fetch all students with pending fees
     // Students who paid this month are already automatically excluded!
-    const pendingStudents = await getFeePendingRecipients();
+    // Skip parents already reminded this month, and send at most 20 per call
+    // (Cloudflare's free plan limits outgoing calls per request). Call again for the rest.
+    const notYetReminded = (await getFeePendingRecipients()).filter((s) => !s.lastSmsSentAt);
+    const pendingStudents = notYetReminded.slice(0, 20);
 
     if (pendingStudents.length === 0) {
       return NextResponse.json({
@@ -67,6 +70,7 @@ export async function POST(request: Request) {
       totalPending: pendingStudents.length,
       sentCount: successful,
       failedCount: pendingStudents.length - successful,
+      remaining: notYetReminded.length - pendingStudents.length,
       results,
     });
   } catch (error) {

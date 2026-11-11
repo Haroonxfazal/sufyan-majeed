@@ -5,18 +5,17 @@ import {
   getAbsenteeRecipients,
   getFeePendingRecipients,
   getSmsLogs,
+  isSmsGatewayEnabled,
 } from "@/lib/services/sms";
-import { getAgentOnline } from "@/lib/services/agent-status";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { todayInKarachi } from "@/lib/utils";
 
 export default async function SmsPage() {
-  const [profile, absentees, feePending, logs, agentOnline] = await Promise.all([
+  const [profile, absentees, feePending, logs] = await Promise.all([
     getCurrentProfile(),
     getAbsenteeRecipients(todayInKarachi()),
     getFeePendingRecipients(),
     getSmsLogs(50),
-    getAgentOnline(),
   ]);
 
   return (
@@ -27,7 +26,7 @@ export default async function SmsPage() {
         initialFeePending={feePending}
         initialLogs={logs}
         currentDate={todayInKarachi()}
-        agentOnline={agentOnline}
+        gatewayEnabled={isSmsGatewayEnabled()}
       />
     </AppShell>
   );

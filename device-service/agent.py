@@ -5,22 +5,20 @@ Runs on the academy PC during class hours. Close the window to stop it.
 
 Every 2 seconds it:
   1. Reads new fingerprint punches from the ZKTeco MB460 and saves them to Supabase.
-  2. Sends SMS that the website has queued, through the Android SMS gateway phone.
-  3. Tells the website it is online (devices.updated_at heartbeat).
+  2. Tells the website it is online (devices.updated_at heartbeat).
+SMS are sent by the website itself, not by this program.
 
 Settings are read from agent.env next to the .exe (or ../.env.local when run as a script).
 
 Usage:
   UniqueAcademyAgent.exe            # run
-  UniqueAcademyAgent.exe --test     # check Supabase, device and SMS phone, then exit
+  UniqueAcademyAgent.exe --test     # check Supabase and the device, then exit
   UniqueAcademyAgent.exe --users    # list users enrolled on the device
 """
 
 import argparse
-import base64
 import os
 import sys
-import threading
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -67,10 +65,6 @@ DEVICE_PORT = int(os.getenv("ZKTECO_PORT") or 4370)
 DEVICE_PASSWORD = int(os.getenv("ZKTECO_PASSWORD") or 0)
 DEVICE_TIMEOUT = int(os.getenv("ZKTECO_TIMEOUT") or 5)
 DEVICE_SERIAL = os.getenv("ZKTECO_DEVICE_SERIAL", "AF6P210960179")
-SMS_URL = os.getenv("SMS_GATEWAY_URL", "").rstrip("/")
-SMS_TOKEN = os.getenv("SMS_GATEWAY_AUTH_TOKEN", "")
-SMS_DEVICE_ID = os.getenv("SMS_GATEWAY_DEVICE_ID", "")
-SMS_ENABLED = os.getenv("SMS_GATEWAY_ENABLED", "true").lower() == "true"
 INTERVAL = float(os.getenv("AGENT_INTERVAL_SECONDS") or 2)
 CATCHUP_DAYS = int(os.getenv("AGENT_CATCHUP_DAYS") or 2)
 
@@ -250,118 +244,6 @@ class DeviceReader:
 
 
 # ---------------------------------------------------------------------------
-# SMS outbox
-# ---------------------------------------------------------------------------
-
-class PhoneOffline(Exception):
-    pass
-
-
-def normalize_phone(phone):
-    digits = "".join(ch for ch in phone if ch.isdigit())
-    if digits.startswith("0092") and len(digits) == 14:
-        return "0" + digits[4:]
-    if digits.startswith("92") and len(digits) == 12:
-        return "0" + digits[2:]
-    if len(digits) == 10 and digits.startswith("3"):
-        return "0" + digits
-    return digits
-
-
-def auth_header():
-    if not SMS_TOKEN:
-        return {}
-    if SMS_TOKEN.lower().startswith(("basic ", "bearer ")):
-        return {"Authorization": SMS_TOKEN}
-    if ":" in SMS_TOKEN:
-        return {"Authorization": "Basic " + base64.b64encode(SMS_TOKEN.encode()).decode()}
-    return {"Authorization": f"Bearer {SMS_TOKEN}"}
-
-
-_working_sms_url = None
-
-
-def send_via_phone(phone, message):
-    """Returns provider message id. Raises PhoneOffline if the phone can't be reached."""
-    global _working_sms_url
-    phone = normalize_phone(phone)
-    body = {
-        "phoneNumbers": [phone], "message": message,
-        "phone_number": phone, "phone": phone, "number": phone, "to": phone,
-        "text": message, "body": message,
-    }
-    if SMS_DEVICE_ID:
-        body.update({"device_id": SMS_DEVICE_ID, "device": SMS_DEVICE_ID})
-    headers = {"Content-Type": "application/json", **auth_header()}
-
-    candidates = [SMS_URL] + [f"{SMS_URL}{p}" for p in ("/message", "/v1/message", "/api/v1/message", "/send")
-                              if not SMS_URL.endswith(p)]
-    if _working_sms_url:
-        candidates.insert(0, _working_sms_url)
-
-    last_error, reached = "", False
-    for url in dict.fromkeys(candidates):
-        try:
-            res = requests.post(url, json=body, headers=headers, timeout=8)
-        except requests.RequestException as e:
-            last_error = str(e)
-            continue
-        reached = True
-        if res.ok:
-            _working_sms_url = url
-            try:
-                data = res.json()
-            except ValueError:
-                data = {}
-            return str(data.get("id") or data.get("message_id") or data.get("messageId") or f"GW-{int(time.time() * 1000)}")
-        last_error = f"Gateway returned {res.status_code}: {res.text[:150]}"
-
-    try:  # MacroDroid webhook fallback
-        res = requests.get(f"{SMS_URL}/trigger", params={"id": "send_sms", "phone": phone, "message": message}, timeout=8)
-        reached = True
-        if res.ok:
-            return f"MACRO-{int(time.time() * 1000)}"
-    except requests.RequestException:
-        pass
-
-    if not reached:
-        raise PhoneOffline(last_error)
-    raise RuntimeError(last_error or "SMS gateway rejected the message")
-
-
-def sms_loop(stop):
-    offline_logged = False
-    while not stop.is_set():
-        try:
-            queued = db("GET", "sms_logs", {
-                "select": "id,to_phone,body", "status": "eq.queued",
-                "order": "created_at.asc", "limit": "20",
-            })
-            for sms in queued:
-                if not SMS_ENABLED:
-                    update = {"status": "sent", "provider": "local_demo", "sent_at": now_iso(),
-                              "provider_message_id": f"DEMO-{int(time.time() * 1000)}"}
-                else:
-                    try:
-                        msg_id = send_via_phone(sms["to_phone"], sms["body"])
-                        update = {"status": "sent", "provider": "android_gateway", "sent_at": now_iso(),
-                                  "provider_message_id": msg_id, "error_message": None}
-                        offline_logged = False
-                    except PhoneOffline as e:
-                        if not offline_logged:
-                            log(f"SMS phone not reachable at {SMS_URL} - will keep retrying. ({e})")
-                            offline_logged = True
-                        break  # leave the rest queued, retry next round
-                    except Exception as e:
-                        update = {"status": "failed", "provider": "android_gateway", "error_message": str(e)[:250]}
-                db("PATCH", "sms_logs", {"id": f"eq.{sms['id']}"}, json=update, prefer="return=minimal")
-                log(f"SMS to {sms['to_phone']}: {update['status'].upper()}")
-        except Exception as e:
-            log(f"SMS check failed: {e}")
-        stop.wait(INTERVAL if not offline_logged else 10)
-
-
-# ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
 
@@ -385,7 +267,7 @@ def get_device_id():
 
 def run():
     print("=" * 62)
-    print("  UNIQUE ACADEMY - ACADEMY AGENT")
+    print("  UNIQUE ACADEMY - ATTENDANCE AGENT")
     print("  Keep this window open during class hours. Close it to stop.")
     print("=" * 62, flush=True)
 
@@ -393,10 +275,6 @@ def run():
     people = PeopleCache()
     people.refresh(force=True)
     log(f"Supabase OK. {len(people.students)} students linked to fingerprint IDs.")
-    log(f"SMS: {'sending through ' + SMS_URL if SMS_ENABLED else 'DEMO mode (SMS only logged)'}")
-
-    stop = threading.Event()
-    threading.Thread(target=sms_loop, args=(stop,), daemon=True).start()
 
     reader = DeviceReader()
     last_beat, last_error_logged = 0.0, None
@@ -431,7 +309,6 @@ def run():
     except KeyboardInterrupt:
         pass
     finally:
-        stop.set()
         reader.disconnect()
         try:
             heartbeat(False, "Academy agent stopped")
@@ -458,15 +335,6 @@ def test():
     except Exception as e:
         ok = False
         print(f"[FAIL] Fingerprint machine at {DEVICE_IP}:{DEVICE_PORT}: {e}")
-    if SMS_ENABLED:
-        try:
-            requests.get(SMS_URL, timeout=5)
-            print(f"[OK]   SMS phone reachable at {SMS_URL}")
-        except requests.RequestException as e:
-            ok = False
-            print(f"[FAIL] SMS phone at {SMS_URL}: {e}")
-    else:
-        print("[INFO] SMS is in DEMO mode (SMS_GATEWAY_ENABLED=false)")
     return ok
 
 

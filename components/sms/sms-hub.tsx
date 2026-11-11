@@ -21,18 +21,42 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import type { AbsenteeRecipient, FeeRecipient, SmsLogItem } from "@/lib/services/sms";
 
+/**
+ * Sends recipients to /api/sms/send in small groups. Cloudflare's free plan allows
+ * about 50 outgoing calls per request, and each SMS needs two (gateway + log).
+ */
+async function sendInChunks(recipients: unknown[], templateKey: string, size = 15) {
+  let sentCount = 0;
+  let firstError: string | undefined;
+  for (let i = 0; i < recipients.length; i += size) {
+    try {
+      const res = await fetch("/api/sms/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recipients: recipients.slice(i, i + size), templateKey }),
+      });
+      const data = await res.json();
+      sentCount += data.sentCount ?? 0;
+      if (!data.success && !firstError) firstError = data.error;
+    } catch {
+      firstError ??= "Network error while sending SMS";
+    }
+  }
+  return { success: sentCount > 0, sentCount, totalCount: recipients.length, error: firstError };
+}
+
 export function SmsHub({
   initialAbsentees,
   initialFeePending,
   initialLogs,
   currentDate,
-  agentOnline = false,
+  gatewayEnabled = false,
 }: {
   initialAbsentees: AbsenteeRecipient[];
   initialFeePending: FeeRecipient[];
   initialLogs: SmsLogItem[];
   currentDate: string;
-  agentOnline?: boolean;
+  gatewayEnabled?: boolean;
 }) {
   const [activeTab, setActiveTab] = useState<"absentee" | "fees" | "logs">("absentee");
   const absentees = initialAbsentees;
@@ -154,20 +178,11 @@ export function SmsHub({
     }));
 
     try {
-      const res = await fetch("/api/sms/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          recipients: payloadRecipients,
-          templateKey: "absence_alert",
-        }),
-      });
-
-      const data = await res.json();
+      const data = await sendInChunks(payloadRecipients, "absence_alert");
       if (data.success) {
         setStatusMessage({
           type: "success",
-          text: `${data.sentCount} Absentee SMS queued. The academy program sends them within seconds (see History tab).`,
+          text: `Sent ${data.sentCount} of ${data.totalCount} Absentee SMS.`,
         });
         // Refresh page after a brief moment
       } else {
@@ -196,20 +211,11 @@ export function SmsHub({
     }));
 
     try {
-      const res = await fetch("/api/sms/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          recipients: payloadRecipients,
-          templateKey: "fee_reminder",
-        }),
-      });
-
-      const data = await res.json();
+      const data = await sendInChunks(payloadRecipients, "fee_reminder");
       if (data.success) {
         setStatusMessage({
           type: "success",
-          text: `${data.sentCount} Fee SMS queued. The academy program sends them within seconds (see History tab).`,
+          text: `Sent ${data.sentCount} of ${data.totalCount} Fee SMS.`,
         });
       } else {
         setStatusMessage({ type: "error", text: data.error || "Failed to send Fee SMS" });
@@ -235,15 +241,15 @@ export function SmsHub({
         </div>
 
         <div className="flex items-center gap-2">
-          {agentOnline ? (
+          {gatewayEnabled ? (
             <Badge variant="outline" className="text-xs bg-emerald-50 dark:bg-emerald-950/30 gap-1.5 py-1 px-3 border-emerald-300 text-emerald-700 dark:text-emerald-400">
               <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-              Academy program online
+              SMS Gateway Active
             </Badge>
           ) : (
             <Badge variant="outline" className="text-xs bg-amber-50 dark:bg-amber-950/30 gap-1.5 py-1 px-3 border-amber-300 text-amber-700 dark:text-amber-400">
               <span className="h-2 w-2 rounded-full bg-amber-500" />
-              Academy program offline (SMS wait in queue)
+              Demo Mode (logs only)
             </Badge>
           )}
         </div>

@@ -56,17 +56,19 @@ Students do not receive login accounts.
 ### 3. How it runs
 
 ```
-Academy PC (class hours)                 Cloud                     Anyone, anywhere
-UniqueAcademyAgent.exe  --writes-->  Supabase  <--reads--  Website on Cloudflare Workers
- - MB460 punches every 2s             (database)               (refreshes every 2s)
- - sends queued SMS via phone  <--sms queue--   "Send SMS" queues rows in sms_logs
+Academy PC (class hours)                 Cloud                         Anyone, anywhere
+UniqueAcademyAgent.exe  --writes-->  Supabase  <--reads/writes--  Website on Cloudflare Workers
+ - MB460 punches every 2s             (database)                      (refreshes every 2s)
+                                                                            |
+Android phone (SMS Gateway app, Cloud Server mode) <-- api.sms-gate.app <---+  "Send SMS"
 ```
 
-- The **website** runs on Cloudflare and talks only to Supabase.
+- The **website** runs on Cloudflare. It reads and writes Supabase and sends SMS itself through the
+  SMS Gateway cloud server, which forwards them to the Android phone (the phone only needs internet).
 - The **academy agent** (`device-service/agent.py`, built as `UniqueAcademyAgent.exe`) is the only part
-  that needs the academy network: it reads the MB460 and sends SMS through the Android gateway phone.
+  that needs the academy network: it reads the MB460.
 - Daily: open `UniqueAcademyAgent.exe` when classes start, close its window when they end.
-  While it is closed, SMS wait in the queue and punches are picked up on the next start.
+  Punches made while it is closed are picked up on the next start. SMS work either way.
 
 ### 4. Website (deploy from any PC)
 
@@ -78,7 +80,14 @@ npx wrangler login             # once
 npm run deploy                 # build + upload to Cloudflare Workers
 ```
 
-`npm run deploy` reads `.env.local` at build time and bundles the values into the Worker.
+Public settings (Supabase URL, anon key, SMS gateway URL) are in the committed `.env.production`.
+Add these as **secrets** in Cloudflare (Worker -> Settings -> Variables and Secrets):
+
+- `SMS_GATEWAY_AUTH_TOKEN` = `username:password` from the app's **Cloud Server** section
+- `SUPABASE_SERVICE_ROLE_KEY` (only needed by the test-scan button and `/api/health`)
+
+SMS phone setup: in the SMS Gateway app, turn on **Cloud Server**, then copy the username and
+password it shows. The phone needs internet (Wi-Fi or mobile data), not the academy network.
 After deploying, the site is at `https://unique-academy.<your-subdomain>.workers.dev`
 (add a custom domain in the Cloudflare dashboard if you want one).
 
@@ -91,7 +100,7 @@ device-service\build_exe.bat
 This makes `device-service\dist\UniqueAcademyAgent.exe`. Copy it with `agent.env` (from
 `device-service\agent.env.example`) to the academy PC, fill in `agent.env`, and make a desktop shortcut.
 
-- `UniqueAcademyAgent.exe --test` checks Supabase, the fingerprint machine and the SMS phone.
+- `UniqueAcademyAgent.exe --test` checks Supabase and the fingerprint machine.
 - `UniqueAcademyAgent.exe --users` lists users enrolled on the machine.
 - For development without building: `device-service\run_agent.bat` (reads `.env.local`).
 
@@ -102,7 +111,7 @@ This makes `device-service\dist\UniqueAcademyAgent.exe`. Copy it with `agent.env
 | `NEXT_PUBLIC_SUPABASE_*` | Website and agent |
 | `SUPABASE_SERVICE_ROLE_KEY` | Website server code and agent |
 | `ZKTECO_*` | Agent only (`agent.env`) |
-| `SMS_GATEWAY_*` | Agent only (`agent.env`) |
+| `SMS_GATEWAY_*` | Website only (URL in `.env.production`, token as a Cloudflare secret) |
 | `AGENT_INTERVAL_SECONDS`, `AGENT_CATCHUP_DAYS` | Agent polling speed and start-up catch-up window |
 
 Do not expose port 4370 to the internet; the agent reaches the MB460 over the academy network.
