@@ -22,6 +22,11 @@ export async function GET(request: Request) {
       "TimeZone=5",
       "Realtime=1",
       "Encrypt=None",
+      // Newer ZKTeco firmware (pushver 2.x) expects the server to announce its protocol version.
+      "ServerVer=2.2.14 2018-12-26",
+      "PushProtVer=2.4.1",
+      "PushOptionsFlag=1",
+      "PushOptions=UserCount,TransactionCount,FingerFunOn,FPVersion,FPCount,FaceFunOn,FaceVersion,FaceCount,IPAddress",
     ].join("\n") + "\n",
   );
 }
