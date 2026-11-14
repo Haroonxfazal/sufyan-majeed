@@ -6,9 +6,14 @@ import { createAdminClient } from "@/lib/supabase/admin";
  * to devices whose serial number (SN) is registered in the devices table.
  */
 export function textResponse(body: string, status = 200) {
+  // Embedded ZKTeco firmware often cannot read chunked replies, so send an explicit length.
   return new Response(body, {
     status,
-    headers: { "Content-Type": "text/plain", "Cache-Control": "no-store" },
+    headers: {
+      "Content-Type": "text/plain",
+      "Cache-Control": "no-store",
+      "Content-Length": String(new TextEncoder().encode(body).length),
+    },
   });
 }
 
