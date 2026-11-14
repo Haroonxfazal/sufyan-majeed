@@ -10,15 +10,17 @@ export async function GET(request: Request) {
   return textResponse(
     [
       `GET OPTION FROM: ${sn}`,
-      // "None" = upload every attendance record not yet sent (duplicates are ignored on our side)
-      "ATTLOGStamp=None",
+      // Stamp 0 = "I have received nothing yet": the machine uploads every stored attendance
+      // record (duplicates are ignored on our side).
+      "ATTLOGStamp=0",
       "OPERLOGStamp=9999",
-      "ATTPHOTOStamp=None",
+      "ATTPHOTOStamp=0",
       "ErrorDelay=30",
       "Delay=10",
       "TransTimes=00:00;12:00",
       "TransInterval=1",
-      "TransFlag=TransData AttLog\tOpLog\tAttPhoto\tEnrollUser\tChgUser\tEnrollFP\tChgFP\tFPImag",
+      // Attendance records only: never ask the machine for fingerprint templates or photos.
+      "TransFlag=TransData AttLog",
       "TimeZone=5",
       "Realtime=1",
       "Encrypt=None",
