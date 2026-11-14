@@ -10,14 +10,18 @@ export async function GET(request: Request) {
   return textResponse(
     [
       `GET OPTION FROM: ${sn}`,
+      // "None" = upload every attendance record not yet sent (duplicates are ignored on our side)
+      "ATTLOGStamp=None",
+      "OPERLOGStamp=9999",
+      "ATTPHOTOStamp=None",
       "ErrorDelay=30",
       "Delay=10",
       "TransTimes=00:00;12:00",
       "TransInterval=1",
-      "TransFlag=TransData AttLog",
+      "TransFlag=TransData AttLog\tOpLog\tAttPhoto\tEnrollUser\tChgUser\tEnrollFP\tChgFP\tFPImag",
       "TimeZone=5",
       "Realtime=1",
-      "Encrypt=0",
+      "Encrypt=None",
     ].join("\n") + "\n",
   );
 }
