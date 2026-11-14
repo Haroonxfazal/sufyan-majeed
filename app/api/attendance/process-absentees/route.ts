@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
+import { requireStaff } from "@/lib/auth/api";
 import { syncAndMarkDailyAttendance } from "@/lib/services/attendance";
 import { todayInKarachi } from "@/lib/utils";
 
 export async function POST(request: Request) {
+  const denied = await requireStaff();
+  if (denied) return denied;
+
   try {
     const { date } = await request.json().catch(() => ({ date: todayInKarachi() }));
     const result = await syncAndMarkDailyAttendance(date || todayInKarachi());

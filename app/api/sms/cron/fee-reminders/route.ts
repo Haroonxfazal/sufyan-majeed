@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireStaff } from "@/lib/auth/api";
 import { getFeePendingRecipients, sendSmsNotification } from "@/lib/services/sms";
 
 /**
@@ -15,9 +16,12 @@ export async function POST(request: Request) {
     const cronSecret = process.env.CRON_SECRET;
     const providedSecret = searchParams.get("secret") || request.headers.get("x-cron-secret");
 
-    // Optional secret check if configured in .env.local
-    if (cronSecret && providedSecret !== cronSecret) {
-      return NextResponse.json({ error: "Unauthorized cron trigger" }, { status: 401 });
+    // Allowed for a signed-in staff member (dashboard button) or a caller with CRON_SECRET.
+    // Fails closed: with no CRON_SECRET configured, only signed-in staff can trigger it.
+    const secretOk = Boolean(cronSecret) && providedSecret === cronSecret;
+    if (!secretOk) {
+      const denied = await requireStaff();
+      if (denied) return denied;
     }
 
     // 1. Fetch all students with pending fees

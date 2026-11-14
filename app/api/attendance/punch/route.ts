@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireStaff } from "@/lib/auth/api";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 /**
@@ -24,6 +25,9 @@ function karachiDate(iso: string) {
 }
 
 export async function POST(request: Request) {
+  const denied = await requireStaff();
+  if (denied) return denied;
+
   try {
     const payload = await request.json();
     const punches = Array.isArray(payload) ? payload : [payload];

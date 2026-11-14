@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
+import { requireStaff } from "@/lib/auth/api";
 import { createClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 
 export async function GET(request: Request) {
+  const denied = await requireStaff();
+  if (denied) return denied;
+
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ error: "Supabase not configured" }, { status: 500 });
   }

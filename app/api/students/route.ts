@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
+import { requireStaff } from "@/lib/auth/api";
 import { createClient } from "@/lib/supabase/server";
 
 export async function GET() {
+  const denied = await requireStaff();
+  if (denied) return denied;
+
   try {
     const supabase = await createClient();
     const { data, error } = await supabase
@@ -23,6 +27,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const denied = await requireStaff();
+  if (denied) return denied;
+
   try {
     const body = await request.json();
     const {

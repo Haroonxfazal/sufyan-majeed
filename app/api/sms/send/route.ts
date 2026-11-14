@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
+import { requireStaff } from "@/lib/auth/api";
 import { sendSmsNotification } from "@/lib/services/sms";
 
 export async function POST(request: Request) {
+  const denied = await requireStaff();
+  if (denied) return denied;
+
   try {
     const body = await request.json();
     const { recipients, templateKey, customMessage } = body;

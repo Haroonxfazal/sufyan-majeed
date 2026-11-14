@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 
 /** The academy agent touches devices.updated_at every ~5 seconds while it runs. */
-export const AGENT_STALE_SECONDS = 20;
+export const AGENT_STALE_SECONDS = 45;
 
 export function isAgentOnline(updatedAt: string | null | undefined, now = Date.now()) {
   if (!updatedAt) return false;
