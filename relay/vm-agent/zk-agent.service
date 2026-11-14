@@ -1,0 +1,13 @@
+[Unit]
+Description=Unique Academy ZKTeco attendance agent
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+ExecStart=/opt/zk-agent/run-agent.sh
+Restart=always
+RestartSec=15
+Environment=TZ=Asia/Karachi
+
+[Install]
+WantedBy=multi-user.target

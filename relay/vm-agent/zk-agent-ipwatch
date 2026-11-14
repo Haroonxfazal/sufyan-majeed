@@ -1,0 +1,2 @@
+# Restart the agent when the academy's public IP changes (checked every 5 minutes).
+*/5 * * * * root IP=$(grep "SN=AF6P210960179" /var/log/nginx/iclock_body.log | tail -1 | awk '{print $2}'); [ -n "$IP" ] && [ "$IP" != "$(cat /opt/zk-agent/current_ip 2>/dev/null)" ] && systemctl is-enabled --quiet zk-agent && systemctl restart zk-agent
