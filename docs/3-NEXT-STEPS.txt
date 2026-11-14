@@ -1,0 +1,57 @@
+UNIQUE ACADEMY - WHAT TO DO NEXT
+================================
+Do these in order. Each step depends on the one before it.
+
+
+1. CLEAN UP OLD PUNCH DATA (once)
+   - In the Supabase SQL Editor, run
+     supabase/migrations/20261111000000_fix_punch_duplicates.sql
+   - Look at the list from step 4 in that file. If it shows students wrongly marked
+     present, run the commented "delete" at the bottom.
+
+2. SET UP CLOUDFLARE
+   - Worker -> Settings -> Build:
+       Build command:  npm run build
+       Deploy command: npx wrangler deploy
+
+3. SWITCH THE SMS PHONE TO CLOUD MODE
+   - In the SMS Gateway app, turn on "Cloud Server" and note the username and password
+     it shows.
+   - In the app's settings, make sure it starts automatically and isn't put to sleep by
+     battery saving.
+
+4. ADD THE SECRETS IN CLOUDFLARE
+   - Go to Worker -> Settings -> Variables and Secrets.
+       SMS_GATEWAY_AUTH_TOKEN    = username:password  (from step 3)
+       SUPABASE_SERVICE_ROLE_KEY = the same value as in your .env.local
+
+5. DEPLOY
+   - Retry the deployment in Cloudflare, or push any commit.
+   - Open your *.workers.dev link and log in.
+   - Click through Dashboard, Students, Attendance, Fees, SMS and Settings.
+     Note any page that errors.
+
+6. TEST SMS
+   - On the SMS page, send one SMS to your own number. Check that it arrives and shows
+     "Sent" in History.
+   - If it shows "Failed", note the error text.
+
+7. SET UP THE ACADEMY PC (once)
+   - Copy device-service\dist\UniqueAcademyAgent.exe and device-service\dist\agent.env
+     into a folder on the academy PC. agent.env is already filled in with your values.
+   - Open Command Prompt in that folder and run:
+       UniqueAcademyAgent.exe --test
+     Both lines should say [OK].
+   - Make a desktop shortcut to UniqueAcademyAgent.exe.
+
+8. TEST ATTENDANCE END TO END
+   - Start the program, put a finger on the MB460, and watch the website's Attendance
+     page. The punch should appear within a few seconds.
+   - The dashboard should show "Program running".
+
+9. DAILY ROUTINE FROM NOW ON
+   - Morning: double-click the shortcut.
+   - Evening: close the window.
+   - The website and SMS work all day, wherever you are.
+
+If any step fails, keep the exact error message so it can be fixed.

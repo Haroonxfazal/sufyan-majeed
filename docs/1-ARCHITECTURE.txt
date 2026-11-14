@@ -1,0 +1,109 @@
+UNIQUE ACADEMY - SYSTEM ARCHITECTURE
+====================================
+
+PURPOSE
+-------
+Attendance and fee management for one academy (up to ~250 students and staff):
+fingerprint attendance, students, fees, classes, reports, and SMS alerts to parents.
+
+
+THE FOUR PARTS
+--------------
+1. WEBSITE (Cloudflare Workers - runs in the cloud, 24/7)
+   - Next.js 16 app (TypeScript, Tailwind, shadcn/ui).
+   - Deployed to Cloudflare Workers with the OpenNext adapter.
+   - All pages: Dashboard, Students, Staff, Parents, Classes, Attendance, Fees, SMS,
+     Reports, Device, Settings.
+   - Sends SMS itself (through the SMS Gateway cloud server).
+   - Pages that show live data refresh every 2 seconds.
+   - Usable from anywhere: phone, home, academy.
+
+2. DATABASE (Supabase - cloud, 24/7)
+   - PostgreSQL + login (Supabase Auth).
+   - Holds everything: students, staff, attendance, fees, SMS history, devices.
+   - The single source of truth. The website and the academy program never talk to each
+     other directly; both talk only to Supabase.
+
+3. ACADEMY PROGRAM (UniqueAcademyAgent.exe - academy PC, class hours only)
+   - Small Python program packaged as one .exe.
+   - Only job: read fingerprint punches from the MB460 machine and save them to Supabase,
+     every 2 seconds, and report "I'm online" to the website.
+   - Opened manually each morning, closed manually after classes.
+   - The only part that must be inside the academy network.
+
+4. SMS PHONE (Android phone with the "SMS Gateway for Android" app, Cloud Server mode)
+   - Sends the actual SMS using its SIM card.
+   - Only needs internet (Wi-Fi or mobile data). Can be anywhere.
+
+
+HARDWARE
+--------
+- ZKTeco MB460/ID fingerprint machine, serial AF6P210960179, academy network IP
+  192.168.100.30, port 4370.
+- Academy Windows PC (runs the academy program).
+- Android phone with a SIM (sends SMS).
+
+
+WHAT RUNS WHERE
+---------------
+Part               Location          Runs when            Needs
+Website            Cloudflare        Always               Nothing from you
+Database           Supabase          Always               Nothing from you
+Academy program    Academy PC        Class hours          Academy network + internet
+SMS phone          Anywhere          Always (ideally)     Internet + SIM balance
+
+
+PROJECT FOLDERS AND KEY FILES
+-----------------------------
+app/                      Website pages and API routes
+  app/api/attendance/     Attendance APIs (calendar, punch test, process absentees)
+  app/api/sms/            Send SMS, delete logs, fee-reminder automation
+components/               Page building blocks (attendance, sms, fees, dashboard...)
+  components/auto-refresh.tsx   The 2-second refresh
+lib/services/             Data logic
+  sms.ts                  Sends SMS through the gateway and logs them
+  attendance.ts           Attendance sheet + mark absentees
+  agent-status.ts         Decides if the academy program is "running"
+lib/supabase/             Database connection
+supabase/migrations/      Database setup SQL + one-time duplicate cleanup SQL
+device-service/           Academy program
+  agent.py                Program source
+  build_exe.bat           Builds UniqueAcademyAgent.exe
+  agent.env.example       Settings template for the program
+  dist/                   Built .exe + filled agent.env (not in git)
+.env.production           Public website settings for Cloudflare (in git)
+.env.local                Your private settings for local use (not in git)
+wrangler.jsonc            Cloudflare Worker settings
+open-next.config.ts       Cloudflare build settings
+backup-before-cloud-move.zip   Full copy of the project before the cloud move (not in git)
+
+
+SETTINGS (WHERE EACH VALUE LIVES)
+---------------------------------
+Website (Cloudflare):
+  .env.production (in git):   NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY,
+                              NEXT_PUBLIC_APP_NAME, SMS_GATEWAY_URL, SMS_GATEWAY_ENABLED
+  Cloudflare secrets:         SMS_GATEWAY_AUTH_TOKEN (cloud username:password),
+                              SUPABASE_SERVICE_ROLE_KEY
+Academy program (agent.env next to the .exe):
+  NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ZKTECO_IP, ZKTECO_PORT,
+  ZKTECO_PASSWORD, ZKTECO_TIMEOUT, ZKTECO_DEVICE_SERIAL,
+  AGENT_INTERVAL_SECONDS (default 2), AGENT_CATCHUP_DAYS (default 2)
+
+
+CODE AND DEPLOYMENT
+-------------------
+- Code: private GitHub repo  github.com/Haroonxfazal/unique-academy  (branch main).
+- Every push to main triggers a Cloudflare build and deploy (build: npm run build,
+  deploy: npx wrangler deploy).
+- The academy program is rebuilt with device-service\build_exe.bat and copied to the
+  academy PC by hand.
+
+
+LIMITS TO KNOW
+--------------
+- Cloudflare free plan: 100,000 requests/day, ~50 outgoing calls per request.
+  One open tab refreshing every 2s uses ~1,800 requests/hour (paused when the tab is hidden).
+  SMS are sent in groups of 15 per request to stay under the limit.
+- Supabase free plan pauses after ~7 days with no activity; daily use prevents this.
+- SMS Gateway cloud server: free.

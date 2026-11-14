@@ -1,0 +1,110 @@
+UNIQUE ACADEMY - HOW THINGS CONNECT
+===================================
+
+THE PICTURE
+-----------
+
+   ACADEMY BUILDING                      INTERNET / CLOUD                    ANYWHERE
+   ----------------                      ----------------                    --------
+
+   MB460 fingerprint                     Supabase database                   Your browser
+   machine                               (all data + logins)                 (phone/laptop)
+   192.168.100.30:4370                         ^      ^                            |
+        |                                      |      |                            |
+        | academy network (LAN)                |      |                            v
+        v                                      |      |                     Website on
+   Academy PC:                    writes punches      reads / writes  <---  Cloudflare
+   UniqueAcademyAgent.exe  -------------------+      +------------------   Workers
+   (every 2 seconds)                                                           |
+                                                                               | sends SMS
+                                                                               v
+                                                                  SMS Gateway cloud server
+                                                                  (api.sms-gate.app)
+                                                                               |
+                                                                               v
+                                                                  Android phone (SIM)
+                                                                               |
+                                                                               v
+                                                                       Parent's mobile
+
+Rule: the website and the academy program never talk directly. Supabase sits in the middle.
+
+
+FLOW 1 - FINGERPRINT ATTENDANCE
+-------------------------------
+1. Student puts a finger on the MB460. The machine stores the punch.
+2. Every 2 seconds the academy program asks the machine "how many punches do you have?".
+   If the number changed, it reads the new punches.
+3. It saves them to Supabase:
+   - attendance_logs: every raw punch (duplicates are ignored automatically).
+   - daily_attendance: the student is marked PRESENT for the day of the punch,
+     keeping the earliest check-in time. A student marked ABSENT becomes PRESENT.
+4. The website's Attendance/Dashboard pages re-read Supabase every 2 seconds,
+   so the punch shows up within a few seconds.
+5. If the program was closed, the next start re-reads the last 2 days of punches,
+   so nothing is lost.
+
+
+FLOW 2 - SENDING SMS
+--------------------
+1. On the SMS page you choose recipients (absentees or fee pending) and press Send.
+2. The browser sends them to the website in groups of 15.
+3. The website posts each SMS to the SMS Gateway cloud server
+   (https://api.sms-gate.app/3rdparty/v1/messages, logging in with the cloud
+   username:password).
+4. The cloud server pushes it to the Android phone, which sends it with its SIM.
+5. The website logs each SMS in Supabase (sms_logs) as SENT or FAILED (with the reason).
+   The History tab shows it.
+Not involved: the academy PC and the academy program. SMS work even when they are off.
+
+
+FLOW 3 - "IS THE ACADEMY PROGRAM RUNNING?"
+------------------------------------------
+1. While running, the program updates the MB460's row in Supabase (devices table)
+   every ~5 seconds, including whether it could reach the machine.
+2. The website treats the program as RUNNING if that update is less than 20 seconds old,
+   otherwise CLOSED.
+3. Shown on the Dashboard ("Academy Connection" card) and the Settings page.
+
+
+FLOW 4 - MARKING ABSENTEES
+--------------------------
+1. On the Attendance page, "Process absentees" (website -> Supabase) marks every active
+   student without a punch today as ABSENT.
+2. Those students appear on the SMS page's Absentee list, ready for alerts.
+   A later punch still flips them to PRESENT.
+
+
+FLOW 5 - LOGIN
+--------------
+Browser -> website -> Supabase Auth. Every page checks the login first; logged-out
+visitors are sent to /login.
+
+
+FLOW 6 - UPDATING THE WEBSITE
+-----------------------------
+Change code -> push to GitHub (main) -> Cloudflare builds (npm run build) and deploys
+(npx wrangler deploy) automatically -> new version live in a few minutes.
+
+
+WHAT EACH CONNECTION NEEDS
+--------------------------
+From                 To                     How                   Needs
+Academy program      MB460                  TCP port 4370 (LAN)   Same academy network
+Academy program      Supabase               HTTPS                 Internet, service role key
+Website              Supabase               HTTPS                 URL + anon key (+ service key)
+Website              SMS Gateway cloud      HTTPS                 Cloud username:password
+SMS Gateway cloud    Android phone          Push over internet    Phone online, app running
+Browser              Website                HTTPS                 Login
+
+
+WHAT HAPPENS WHEN SOMETHING IS OFF
+----------------------------------
+Academy program closed  -> Website and SMS keep working. No new punches until it is
+                           opened; then missed punches (last 2 days) are picked up.
+Academy internet down   -> Program keeps retrying; punches stay on the machine and upload
+                           when internet returns.
+MB460 off/unreachable   -> Dashboard shows device offline with the error; program retries.
+Phone off / no internet -> SMS show FAILED with a reason; resend later.
+Wrong SMS password      -> SMS show FAILED: "check SMS_GATEWAY_AUTH_TOKEN username:password".
+Supabase down           -> Website can't load data; program retries until it is back.
