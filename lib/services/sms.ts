@@ -261,7 +261,15 @@ async function sendViaGateway(
         const text = await res.text().catch(() => "");
         lastError = `Gateway returned ${res.status}: ${text.slice(0, 150)}`;
         if (res.status === 401 || res.status === 403) {
-          return { success: false, error: `${lastError} (check SMS_GATEWAY_AUTH_TOKEN username:password)` };
+          // Never print the password: only the username, length and the URL that was called.
+          const [tokenUser = "", ...tokenRest] = config.authToken.split(":");
+          const hint = config.authToken
+            ? `token username "${tokenUser}", password length ${tokenRest.join(":").length}, url ${url}`
+            : "SMS_GATEWAY_AUTH_TOKEN is empty";
+          return {
+            success: false,
+            error: `${lastError} (check SMS_GATEWAY_AUTH_TOKEN username:password; ${hint})`,
+          };
         }
         if (res.status === 404 || res.status === 405) break; // wrong path: try next URL
       } catch (err) {
